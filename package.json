@@ -1,6 +1,6 @@
 {
   "name": "homebridge-xiaomi-plant-monitor",
-  "version": "1.0.12",
+  "version": "1.0.16",
   "description": "",
   "main": "index.js",
   "keywords": [
