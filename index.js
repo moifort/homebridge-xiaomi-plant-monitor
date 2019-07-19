@@ -15,7 +15,7 @@ function MifloraAccessory(log, config) {
     this.discoverOptions = {
         addresses: ['c4:7c:8d:6a:65:de'],
         ignoreUnknown: true,
-        duration: 60000
+        duration: 3600000
     }
 
     this.humidityService = new Service.HumiditySensor('Ficus')
@@ -44,7 +44,7 @@ async function init(discoverOptions, humidityService) {
 async function getPlantData(device, humidityService) {
     try {
         const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
-        console.log(battery, firmware, temperature, lux, moisture, fertility)
+        console.log('battery',battery, 'firmware',firmware, 'temperature',temperature, 'lux',lux, 'moisture',moisture, 'fertility',fertility)
         humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
             .updateValue(moisture)
         humidityService.getCharacteristic(Characteristic.StatusLowBattery)
