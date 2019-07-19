@@ -12,47 +12,55 @@ module.exports = function (homebridge) {
 
 function MifloraAccessory(log, config) {
     this.log = log
-    this.discoverOptions = {
-        addresses: ['c4:7c:8d:6a:65:de'],
+    this.name = config['name'] || 'Mi Plant'
+    if (!config['macAddress']) {
+        this.log('No mac address define for', this.name)
+        return
+    }
+
+    this.macAddress = config['macAddress'].toLocaleLowerCase()
+    this.scanDurationInMs = config['scanDurationInMs'] || 60000
+    this.fetchDataIntervalInMs = config['fetchDataIntervalInMs'] || 3600000
+
+    this.humidityService = new Service.HumiditySensor(this.name)
+    this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).on('get', callback => callback(null, 0))
+    this.humidityService.getCharacteristic(Characteristic.StatusLowBattery).on('get', callback => callback(null, false))
+    this.humidityService.getCharacteristic(Characteristic.StatusActive).on('get', callback => callback(null, false))
+
+    try {
+        init(this.macAddress, this.scanDurationInMs, this.fetchDataIntervalInMs, this.humidityService, this.log)
+    } catch (e) {
+        this.log(e)
+    }
+}
+
+async function init(macAddress, scanDurationInMs, fetchDataIntervalInMs, humidityService, log) {
+    log('Scanning %s for a max of %s seconds', macAddress, scanDurationInMs / 1000)
+    log('Fetch data every %s seconds', fetchDataIntervalInMs / 1000)
+    const devices = await miflora.discover({
+        addresses: [macAddress],
         ignoreUnknown: true,
-        duration: 3600000
-    }
-
-    this.humidityService = new Service.HumiditySensor('Ficus')
-    this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
-        .on('get', callback => callback(null, 0))
-    this.humidityService.getCharacteristic(Characteristic.StatusLowBattery)
-        .on('get', callback => callback(null, false))
-    this.humidityService.getCharacteristic(Characteristic.StatusActive)
-        .on('get', callback => callback(null, false))
-
-    init(this.discoverOptions, this.humidityService)
-}
-
-async function init(discoverOptions, humidityService) {
-    console.log('> scanning for a max of %s seconds', discoverOptions.duration / 1000)
-    const devices = await miflora.discover(discoverOptions)
-    const device = devices.find(entry => entry.address === 'c4:7c:8d:6a:65:de')
+        duration: scanDurationInMs
+    })
+    const device = devices.find(entry => entry.address === macAddress)
     if (device) {
-        await getPlantData(device, humidityService)
-        setInterval(() => getPlantData(device, humidityService), 60000)
+        await getPlantData(device, humidityService, log)
+        setInterval(() => getPlantData(device, humidityService, log), fetchDataIntervalInMs)
     } else {
-        console.log('not found')
+        log('Device %s not found', macAddress)
     }
 }
 
-async function getPlantData(device, humidityService) {
+async function getPlantData(device, humidityService, log) {
     try {
         const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
-        console.log('battery',battery, 'firmware',firmware, 'temperature',temperature, 'lux',lux, 'moisture',moisture, 'fertility',fertility)
-        humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
-            .updateValue(moisture)
-        humidityService.getCharacteristic(Characteristic.StatusLowBattery)
-            .updateValue(battery < 10)
-        humidityService.getCharacteristic(Characteristic.StatusActive)
-            .updateValue(true)
+        log(`battery: ${battery}%  firmware: ${firmware} temperature: ${temperature}° lux: ${lux} moisture: ${moisture}% fertility: ${fertility}`)
+
+        humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).updateValue(moisture)
+        humidityService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(battery < 10)
+        humidityService.getCharacteristic(Characteristic.StatusActive).updateValue(true)
     } catch (e) {
-        console.log(e)
+        log(e)
     }
 }
 
