@@ -26,7 +26,7 @@ class MifloraAccessory {
         // Data
         this.currentFirmwareVersion = '0.0.0'
         this.currentBattery = 0
-        this.isLowBattery = this.currentBattery < 10
+        this.isLowBattery = false
         this.currentTemperature = 0
         this.currentMoisture = 0
         this.currentLux = 0
@@ -83,6 +83,7 @@ class MifloraAccessory {
             const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
             this.currentFirmwareVersion = firmware
             this.currentBattery = battery
+            this.isLowBattery = this.currentBattery < 10
             this.currentTemperature = temperature
             this.currentLux = lux
             this.currentMoisture = moisture
