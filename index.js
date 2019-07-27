@@ -34,7 +34,7 @@ class MifloraPlatfrom {
     }
 
     async fetchPlantsData() {
-        this.plants.forEach(plant => this.updatePlantData(plant.device, plant.accessory.getService(Service.HumiditySensor), plant.accessory.getService(Service.BatteryService)))
+        this.plants.forEach(plant => this.updatePlantData(plant))
     }
 
     async searchAndAddNewPlant() {
@@ -62,13 +62,18 @@ class MifloraPlatfrom {
         }
     }
 
-    async updatePlantData(device, humidityService, batteryService) {
-        if (device === undefined) {
-            this.log('Cached plant not found')
+    async updatePlantData(plant) {
+        if (plant.device === undefined) {
+            this.log('Cached plant not found remove from accessory')
+            this.api.unregisterPlatformAccessories('homebridge-xiaomi-plant-monitor', 'xiaomi-plant-monitor', [plant.accessory])
+            const indexToDelete = this.plants.findIndex(element => element === plant)
+            this.plants.splice(indexToDelete, 1)
             return
         }
-        const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
+        const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await plant.device.query()
         this.log(`battery: ${battery}%  firmware: ${firmware} temperature: ${temperature}° lux: ${lux} moisture: ${moisture}% fertility: ${fertility}`)
+        const humidityService = plant.accessory.getService(Service.HumiditySensor)
+        const batteryService = plant.accessory.getService(Service.BatteryService)
         humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).updateValue(moisture)
         humidityService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(battery < 10 ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL)
         batteryService.setCharacteristic(Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE)
