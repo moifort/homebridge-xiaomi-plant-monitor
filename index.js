@@ -63,6 +63,10 @@ class MifloraPlatfrom {
     }
 
     async updatePlantData(device, humidityService, batteryService) {
+        if (device === undefined) {
+            this.log('Cached plant not found')
+            return
+        }
         const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
         this.log(`battery: ${battery}%  firmware: ${firmware} temperature: ${temperature}° lux: ${lux} moisture: ${moisture}% fertility: ${fertility}`)
         humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).updateValue(moisture)
