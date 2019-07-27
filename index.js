@@ -1,114 +1,79 @@
 const miflora = require('miflora')
-var Service, Characteristic
-
+let Accessory, Service, Characteristic, UUIDGen
 
 module.exports = function (homebridge) {
+    Accessory = homebridge.platformAccessory
     Service = homebridge.hap.Service
     Characteristic = homebridge.hap.Characteristic
+    UUIDGen = homebridge.hap.uuid
 
-    homebridge.registerAccessory("homebridge-xiaomi-plant-monitor", "xiaomi-plant-monitor", MifloraAccessory)
+    homebridge.registerPlatform('homebridge-xiaomi-plant-monitor', 'xiaomi-plant-monitor', MifloraPlatfrom, true)
 }
 
-class MifloraAccessory {
+class MifloraPlatfrom {
 
-    constructor(log, config) {
-        // Setup configuration
+    constructor(log, config, api) {
         this.log = log
-        this.name = config['name'] || 'Mi Plant'
-        if (!config['macAddress']) {
-            this.log('No mac address define for', this.name)
-            return
-        }
-        this.macAddress = config['macAddress'].toLocaleLowerCase()
-        this.scanDurationInMs = config['scanDurationInMs'] || 60000
-        this.fetchDataIntervalInMs = config['fetchDataIntervalInMs'] || 3600000
+        this.api = api
+        this.fetchDataIntervalInMs = config['fetchDataIntervalInMs'] || 3600000 // Every hours
+        this.plants = []
 
-        // Data
-        this.currentFirmwareVersion = '0.0.0'
-        this.currentBattery = 0
-        this.isLowBattery = false
-        this.currentTemperature = 0
-        this.currentMoisture = 0
-        this.currentLux = 0
-        this.currentFertility = 0
-        this.isActive = false
-
-        // Setup services
-        this.informationService = new Service.AccessoryInformation()
-        this.informationService
-            .setCharacteristic(Characteristic.Manufacturer, 'Xiaomi')
-            .setCharacteristic(Characteristic.Model, 'Plant Monitor')
-            .setCharacteristic(Characteristic.SerialNumber, this.macAddress)
-        this.informationService.getCharacteristic(Characteristic.FirmwareRevision)
-            .on('get', callback => callback(null, this.currentFirmwareVersion))
-
-        this.batteryService = new Service.BatteryService(this.name)
-        this.batteryService.setCharacteristic(Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE)
-        this.batteryService.getCharacteristic(Characteristic.BatteryLevel)
-            .on('get', callback => callback(null, this.currentBattery))
-        this.batteryService.getCharacteristic(Characteristic.StatusLowBattery)
-            .on('get', callback => callback(null, this.getLowBatteryCharacteristic()))
-
-        this.humidityService = new Service.HumiditySensor(this.name)
-        this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
-            .on('get', callback => callback(null, this.currentMoisture))
-        this.humidityService.getCharacteristic(Characteristic.StatusLowBattery)
-            .on('get', callback => callback(null, this.getLowBatteryCharacteristic()))
-        this.humidityService.getCharacteristic(Characteristic.StatusActive)
-            .on('get', callback => callback(null, this.isActive))
-
-        // Fetch sensor data
-        this.fetchDataSensor().catch(error => this.log(error))
+        this.run().catch(error => this.log.error(error))
+        setInterval(() => this.run().catch(error => this.log.error(error)), this.fetchDataIntervalInMs)
     }
 
-    async fetchDataSensor() {
-        this.log('Scanning %s for a max of %s seconds', this.macAddress, this.scanDurationInMs / 1000)
-        this.log('Fetch data every %s seconds', this.fetchDataIntervalInMs / 1000)
-        const devices = await miflora.discover({
-            addresses: [this.macAddress],
-            ignoreUnknown: true,
-            duration: this.scanDurationInMs
-        })
-        const device = devices.find(entry => entry.address === this.macAddress)
-        if (device) {
-            await this.getPlantData(device)
-            setInterval(() => this.getPlantData(device), this.fetchDataIntervalInMs)
-        } else {
-            this.log('Device %s not found', this.macAddress)
-        }
-    }
-
-    async getPlantData(device) {
+    async run() {
         try {
-            const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
-            this.currentFirmwareVersion = firmware
-            this.currentBattery = battery
-            this.isLowBattery = this.currentBattery < 10
-            this.currentTemperature = temperature
-            this.currentLux = lux
-            this.currentMoisture = moisture
-            this.currentFertility = fertility
-            this.isActive = true
-            this.log(`battery: ${this.currentBattery}%  firmware: ${this.currentFirmwareVersion} temperature: ${this.currentTemperature}° lux: ${this.currentLux} moisture: ${this.currentMoisture}% fertility: ${this.currentFertility}`)
-
-            this.informationService.getCharacteristic(Characteristic.FirmwareRevision).updateValue(this.currentFirmwareVersion)
-
-            this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).updateValue(this.currentMoisture)
-            this.humidityService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(this.getLowBatteryCharacteristic())
-            this.humidityService.getCharacteristic(Characteristic.StatusActive).updateValue(this.isActive)
-
-            this.batteryService.getCharacteristic(Characteristic.BatteryLevel).updateValue(this.currentBattery)
-            this.batteryService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(this.getLowBatteryCharacteristic())
+            this.log('Search and Add new plant')
+            await this.searchAndAddNewPlant()
+            this.log('Fetch plants data')
+            await this.fetchPlantsData()
         } catch (e) {
-            this.log(e)
+            this.log.error(e)
         }
     }
 
-    getLowBatteryCharacteristic() {
-        return this.isLowBattery ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+    async fetchPlantsData() {
+        this.plants.forEach(plant => this.updatePlantData(plant.device, plant.accessory.getService(Service.HumiditySensor), plant.accessory.getService(Service.BatteryService)))
     }
 
-    getServices() {
-        return [this.informationService, this.batteryService, this.humidityService]
+    async searchAndAddNewPlant() {
+        this.log('Scanning for Mi plant')
+        const devices = await miflora.discover()
+        this.log('Finish scanning found %s plant(s)', devices.length)
+        devices.forEach(device => this.addPlantAccessory(device))
+    }
+
+    async addPlantAccessory(device) {
+        const plant = this.plants.find(plant => plant.accessory.displayName === device.address)
+        if (plant === undefined) {
+            this.log(`Add new plant ${device.address}`)
+            const accessory = new Accessory(device.address, UUIDGen.generate(device.address))
+            accessory.addService(Service.HumiditySensor, device.address)
+            accessory.addService(Service.BatteryService, device.address)
+            this.plants.push({device, accessory})
+            this.api.registerPlatformAccessories('homebridge-xiaomi-plant-monitor', 'xiaomi-plant-monitor', [accessory])
+        } else if (plant.device === undefined) {
+            this.log(`Set cached plant`)
+            const indexToUpdate = this.plants.findIndex(plant => plant.accessory.displayName === device.address)
+            this.plants[indexToUpdate] = {device, accessory: plant.accessory}
+        } else {
+            this.log(`No plant to add`)
+        }
+    }
+
+    async updatePlantData(device, humidityService, batteryService) {
+        const {firmwareInfo: {battery, firmware}, sensorValues: {temperature, lux, moisture, fertility}} = await device.query()
+        this.log(`battery: ${battery}%  firmware: ${firmware} temperature: ${temperature}° lux: ${lux} moisture: ${moisture}% fertility: ${fertility}`)
+        humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity).updateValue(moisture)
+        humidityService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(battery < 10 ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL)
+        batteryService.setCharacteristic(Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE)
+        batteryService.getCharacteristic(Characteristic.BatteryLevel).updateValue(battery)
+        batteryService.getCharacteristic(Characteristic.StatusLowBattery).updateValue(battery < 10 ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL)
+    }
+
+    async configureAccessory(accessory) {
+        this.log(accessory.displayName, 'Add cached Accessory')
+        this.plants.push({device: undefined, accessory})
     }
 }
